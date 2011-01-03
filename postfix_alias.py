@@ -5,8 +5,10 @@ import MySQLdb
 from optparse import OptionParser
 
 DBNAME = "postfix"
-DBUSER = "root"
-DBPASSWD = ""
+DBUSER = "aliaser"
+f = open("postfix_alias.key", "r")
+DBPASSWD = f.readline().rstrip()
+f.close()
 
 
 cache = {}
