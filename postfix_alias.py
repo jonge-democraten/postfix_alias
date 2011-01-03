@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
-import sys
+import os,sys
 import MySQLdb
 from optparse import OptionParser
 
 DBNAME = "postfix"
 DBUSER = "aliaser"
-f = open("postfix_alias.key", "r")
+# trick to read keyfile from same dir as actual script, even when called via symlink
+keyfile = os.path.dirname(os.path.realpath(__file__))+"/postfix_alias.key"
+f = open(keyfile, "r")
 DBPASSWD = f.readline().rstrip()
 f.close()
 
