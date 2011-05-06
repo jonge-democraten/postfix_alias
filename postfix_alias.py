@@ -31,7 +31,7 @@ def get_tree(email, d = 0):
 		c.execute("SELECT * FROM virtual_aliases WHERE source LIKE %s", (email,))
 		r = c.fetchall()
 		cache[email] = set([a[2] for a in r])
-	return {email:[get_tree(m, d+1) for m in cache[email]]}
+	return (email, [get_tree(m, d+1) for m in cache[email]])
 
 
 def del_link(from_email, to_email):
@@ -53,17 +53,43 @@ def add_link(from_email, to_email):
 	return affected_rows
 
 def print_tree(tree, level=0, indent="    "):
-	for m in tree.keys():
-		print (level*indent)+m
-		for a in tree[m]:
-			print_tree(a, level+1)
+	print (level*indent)+tree[0]
+	for a in tree[1]:
+		print_tree(a, level+1)
+
+def get_open_leaves():
+	global c
+	global db
+	c.execute("SELECT * FROM virtual_aliases WHERE destination LIKE '%@jongedemocraten.nl'")
+	rows = c.fetchall()
+	open_leaves = set()
+	for r in rows:
+		tree = get_tree(r[2]) # Get tree from the destination
+		subtrees = [tree]
+		leaves = set()
+		while subtrees:
+			tree = subtrees.pop()
+			if tree[1]: # has leaves
+				subtrees += tree[1]
+			else:
+				leaves.add(tree[0])
+		for l in leaves:
+			if l.endswith("@jongedemocraten.nl"):
+				open_leaves.add(l)
+	return list(open_leaves)
+
+	
+
+
 
 if __name__ == "__main__":
 	if not DBPASSWD:
 		DBPASSWD = raw_input("Password: ")
 	db = MySQLdb.connect(user=DBUSER, passwd=DBPASSWD, db=DBNAME)
 	c = db.cursor()
-	if len(sys.argv) == 2:
+	if len(sys.argv) == 1:
+		print get_open_leaves()
+	elif len(sys.argv) == 2:
 		# sys.argv[0] email
 		# print full tree
 		print_tree(get_tree(expand_email(sys.argv[1])))
