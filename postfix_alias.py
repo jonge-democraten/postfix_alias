@@ -89,8 +89,8 @@ if __name__ == "__main__":
 	db = MySQLdb.connect(user=DBUSER, passwd=DBPASSWD, db=DBNAME)
 	c = db.cursor()
 	if len(sys.argv) == 1:
-		expr = string.join(get_open_leaves(), "OR LIKE ")
-		c.execute("SELECT source, destination FROM virtual_aliases WHERE destination LIKE %s", expr)
+		expr = string.join(get_open_leaves(), "', '")
+		c.execute("SELECT source, destination FROM virtual_aliases WHERE destination IN ('%s')" % expr)
 		print "Aliases going nowhere:"
 		for a in c.fetchall():
 			print "%s => %s" % (a[0], a[1])
