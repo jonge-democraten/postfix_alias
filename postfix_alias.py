@@ -2,6 +2,7 @@
 
 import os,sys
 import MySQLdb
+import string
 from optparse import OptionParser
 
 DBNAME = "postfix"
@@ -88,7 +89,11 @@ if __name__ == "__main__":
 	db = MySQLdb.connect(user=DBUSER, passwd=DBPASSWD, db=DBNAME)
 	c = db.cursor()
 	if len(sys.argv) == 1:
-		print get_open_leaves()
+		expr = string.join(get_open_leaves(), "OR LIKE ")
+		c.execute("SELECT source, destination FROM virtual_aliases WHERE destination LIKE %s", expr)
+		print "Aliases going nowhere:"
+		for a in c.fetchall():
+			print "%s => %s" % (a[0], a[1])
 	elif len(sys.argv) == 2:
 		# sys.argv[0] email
 		# print full tree
