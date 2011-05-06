@@ -26,11 +26,13 @@ def get_tree(email, d = 0):
 	if d > 64: # Max recursion depth exceeded
 		return {email:["!"]}
 	global cache
+	global c
 	if not cache.has_key(email):
 		c.execute("SELECT * FROM virtual_aliases WHERE source LIKE %s", (email,))
 		r = c.fetchall()
 		cache[email] = set([a[2] for a in r])
 	return {email:[get_tree(m, d+1) for m in cache[email]]}
+
 
 def del_link(from_email, to_email):
 	global c
