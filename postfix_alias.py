@@ -79,8 +79,18 @@ def get_open_leaves():
 				open_leaves.add(l)
 	return list(open_leaves)
 
-	
+def print_usage():
+	print """\
+Usage:
 
+postfix_alias
+	Finds and displays aliases that lead nowhere.
+postfix_alias address@jongedemocraten.nl
+	Displays the alias tree for the specified address.
+postfix_alias add source@jongedemocraten.nl destination@jongedemocraten.nl
+	Adds a new alias.
+postfix_alias del source@jongedemocraten.nl destination@jongedemocraten.nl
+	Removes an existing alias."""
 
 
 if __name__ == "__main__":
@@ -107,6 +117,9 @@ if __name__ == "__main__":
 		elif sys.argv[1] == "del":
 			sys.exit(del_link(expand_email(sys.argv[2]), expand_email(sys.argv[3])))
 		else:
-			print "Unknown command \"%s\". Did you mean \"add\" or \"del\"?"
+			print_usage()
 			sys.exit(-1)
+	else:
+		print_usage()
+		sys.exit(-1)
 	db.close()
