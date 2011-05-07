@@ -87,7 +87,7 @@ def make_units(unit):
 	rows = c.fetchall()
 	if len(rows) < 1:
 		print "Unit not found"
-		return -1
+		return 0
 	newlinks = {}
 	for r in rows:
 		# Replace function.unit@jongedemocraten.nl with function@jdunit.nl
@@ -108,7 +108,7 @@ def make_units(unit):
 	srcmake = sources - srcexist
 	if len(srcmake) < 1:
 		print "Nothing to do"
-		return -1
+		return 0
 	a = []
 	for s in srcmake:
 		a.append( (s, newlinks[s]) )
@@ -121,11 +121,11 @@ def make_units(unit):
 	if raw_input("Proceed? [y/N] ").startswith(("y","Y","j","J")):
 		db.commit()
 		print "Committed"
-		return 0
+		return 1
 	else:
 		db.rollback()
 		print "Rolled back"
-		return -1
+		return 0
 
 	
 def print_usage():
@@ -142,6 +142,7 @@ postfix_alias add source@jongedemocraten.nl destination@jongedemocraten.nl
 	Adds a new alias.
 postfix_alias del source@jongedemocraten.nl destination@jongedemocraten.nl
 	Removes an existing alias."""
+	return
 
 
 if __name__ == "__main__":
@@ -160,24 +161,26 @@ if __name__ == "__main__":
 		# sys.argv[0] email
 		# print full tree
 		print_tree(get_tree(expand_email(sys.argv[1])))
-		sys.exit(1)
+		sys.exit(0)
 	elif len(sys.argv) == 3:
 		if sys.argv[1] == "unit":
-			sys.exit(make_units(sys.argv[2]))
+			sys.exit( 0 if make_units(sys.argv[2]) else 1 )
 		else:
 			print_usage()
-			sys.exit(-1)
+			sys.exit(127)
 	elif len(sys.argv) == 4:
 		# sys.argv[0] cmd source_email dest_email
 		# Add or remove the link between source_email and dest_email
 		if sys.argv[1] == "add":
-			sys.exit(add_link(expand_email(sys.argv[2]), expand_email(sys.argv[3])))
+			add_link(expand_email(sys.argv[2]), expand_email(sys.argv[3]))
+			sys.exit(0)
 		elif sys.argv[1] == "del":
-			sys.exit(del_link(expand_email(sys.argv[2]), expand_email(sys.argv[3])))
+			del_link(expand_email(sys.argv[2]), expand_email(sys.argv[3]))
+			sys.exit(0)
 		else:
 			print_usage()
-			sys.exit(-1)
+			sys.exit(127)
 	else:
 		print_usage()
-		sys.exit(-1)
+		sys.exit(127)
 	db.close()
