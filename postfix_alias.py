@@ -62,7 +62,14 @@ def print_tree(tree, level=0, indent="    "):
 def get_open_leaves():
 	global c
 	global db
-	c.execute("SELECT * FROM virtual_aliases WHERE destination LIKE '%@jongedemocraten.nl'")
+	# mailman.jongedemocraten.nl is a virtual alias domain, but is delivered locally
+	c.execute("SELECT name FROM virtual_domains WHERE name != 'mailman.jongedemocraten.nl'")
+	rows = c.fetchall()
+	domains = set()
+	for r in rows:
+		domains.add("@%s" % r[0])
+	# Select all aliases that point to a virtual_alias_domain (i.e. another alias)
+	c.execute("SELECT * FROM virtual_aliases WHERE destination REGEXP '.*(%s)'" % string.join(domains, "|"))
 	rows = c.fetchall()
 	open_leaves = set()
 	for r in rows:
@@ -76,7 +83,7 @@ def get_open_leaves():
 			else:
 				leaves.add(tree[0])
 		for l in leaves:
-			if l.endswith("@jongedemocraten.nl"):
+			if l.endswith(tuple(domains)):
 				open_leaves.add(l)
 	return list(open_leaves)
 
