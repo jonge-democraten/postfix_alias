@@ -88,8 +88,9 @@ def get_open_leaves():
 	return list(open_leaves)
 
 def alias_copy(rows, reorig, rechange):
+	# reorig and rechange are just strings, not re objects
 	if len(rows) < 1:
-		print "Unit not found"
+		print "No unit aliases found"
 		return 0
 	newalias = {}
 	for r in rows:
@@ -171,9 +172,10 @@ if __name__ == "__main__":
 	if len(sys.argv) == 1:
 		expr = string.join(get_open_leaves(), "', '")
 		c.execute("SELECT source, destination FROM virtual_aliases WHERE destination IN ('%s')" % expr)
-		print "Aliases going nowhere:"
+		print "Aliases going nowhere:\n"
 		for a in c.fetchall():
-			print "%s => %s" % (a[0], a[1])
+			print "%s %s" % (a[0], a[1])
+		print "\nTo remove, copypaste each line to: postfix_alias del"
 	elif len(sys.argv) == 2:
 		# sys.argv[0] email
 		# print full tree
