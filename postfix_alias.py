@@ -87,38 +87,31 @@ def get_open_leaves():
 				open_leaves.add(l)
 	return list(open_leaves)
 
-def make_units(unit):
-	global c
-	global db
-	c.execute("SELECT source, destination FROM virtual_aliases WHERE source LIKE '%%.%s@jongedemocraten.nl'" % unit)
-	rows = c.fetchall()
+def alias_copy(rows, reorig, rechange):
 	if len(rows) < 1:
 		print "Unit not found"
 		return 0
-	newlinks = {}
+	newalias = {}
 	for r in rows:
 		# Replace function.unit@jongedemocraten.nl with function@jdunit.nl
-		unitsrc = re.sub(r"(.*)\.%s@jongedemocraten.nl" % unit, r"\1@jd%s.nl" % unit, r[0])
-		newlinks[unitsrc] = r[0]
+		unitsrc = re.sub(reorig, rechange, r[0])
+		newalias[unitsrc] = r[0]
 	# Only create new aliases if no existing alias exists yet
-	sources = set(newlinks.keys())
+	sources = set(newalias.keys())
 	c.execute("SELECT source FROM virtual_aliases WHERE source IN ('%s')" % string.join(sources, "', '"))
 	rows = c.fetchall()
 	srcexist = set()
 	for r in rows:
 		srcexist.add(r[0])
-	#query = "INSERT INTO virtual_aliases (source, destination) VALUES "
-	#for s in sources - srcexist:
-	#	query += "('%s', '%s'), " % (s, newlinks[s])
-	#query = query.rstrip(", ") + ";"
-	#print query
 	srcmake = sources - srcexist
+	#TODO: delete aliases that should no longer exist
+	#srcdel = srcexist - sources
 	if len(srcmake) < 1:
 		print "Nothing to do"
 		return 0
 	a = []
 	for s in srcmake:
-		a.append( (s, newlinks[s]) )
+		a.append( (s, newalias[s]) )
 	c.executemany("INSERT INTO virtual_aliases (source, destination) VALUES (%s, %s)", a)
 	c.execute("SELECT source, destination FROM virtual_aliases WHERE source IN ('%s')" % string.join(srcmake, "', '"))
 	rows = c.fetchall()
@@ -134,7 +127,20 @@ def make_units(unit):
 		print "Rolled back"
 		return 0
 
-	
+def make_units(unit):
+	global c
+	global db
+	c.execute("SELECT source, destination FROM virtual_aliases WHERE source LIKE '%%.%s@jongedemocraten.nl'" % unit)
+	# alias_copy(rows, reorig, rechange)
+	return alias_copy(c.fetchall(), r"(.*)\.%s@jongedemocraten\.nl" % unit, r"\1@jd%s.nl" % unit)
+
+def make_subunits(subunit, unit):
+	global c
+	global db
+	c.execute("SELECT source FROM virtual_aliases WHERE source LIKE %s", ("%@jd"+unit+".nl",) )
+	# alias_copy(rows, reorig, rechange)
+	return alias_copy(c.fetchall(), r"(.*)@jd%s\.nl" % unit, r"\1@jd%s.nl" % subunit)
+
 def print_usage():
 	print """\
 Usage:
@@ -145,6 +151,10 @@ postfix_alias address@jongedemocraten.nl
 	Displays the alias tree for the specified address.
 postfix_alias unit unitname
 	Creates jdunit.nl aliases, asks for confirmation first.
+	e.g. postfix_alias unit twente
+postfix_alias subunit subunitname unitname
+	Creates jdsubunit.nl aliases to point to jdunit.nl equivalents.
+	e.g. postfix_alias subunit enschede twente
 postfix_alias add source@jongedemocraten.nl destination@jongedemocraten.nl
 	Adds a new alias.
 postfix_alias del source@jongedemocraten.nl destination@jongedemocraten.nl
@@ -184,6 +194,8 @@ if __name__ == "__main__":
 		elif sys.argv[1] == "del":
 			del_link(expand_email(sys.argv[2]), expand_email(sys.argv[3]))
 			sys.exit(0)
+		elif sys.argv[1] == "subunit":
+			make_subunits(sys.argv[2], sys.argv[3])
 		else:
 			print_usage()
 			sys.exit(127)
