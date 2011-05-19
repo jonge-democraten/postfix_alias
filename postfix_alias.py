@@ -17,12 +17,21 @@ f.close()
 
 cache = {}
 tree = {}
+domcache = {}
+rdomcache = {}
 
 
 def expand_email(e):
-	if e.find("@") == -1:
-		return e+"@jongedemocraten.nl"
-	return e
+	return e if "@" in e else e+"@jongedemocraten.nl"
+
+def parse_email(e):
+	# Split user@example.net to user and example.net
+	user, domain = re.split("@", e, 1)
+	if domain in rdomcache:
+		domid = rdomcache[domain]
+		return user, domain, domid
+	else:
+		return user, domain, None
 
 def get_tree(email, d = 0):
 	if d > 64: # Max recursion depth exceeded
@@ -30,38 +39,44 @@ def get_tree(email, d = 0):
 	global cache
 	global c
 	if not cache.has_key(email):
-		c.execute("SELECT * FROM virtual_aliases WHERE source LIKE %s", (email,))
-		r = c.fetchall()
-		cache[email] = set([a[2] for a in r])
+		user, domain, domid = parse_email(email)
+		c.execute("SELECT destination FROM virtual_aliases WHERE sourceuser=%s AND sourcedomain=%s", (user, domid))
+		#c.execute("""SELECT destination FROM virtual_aliases WHERE sourceuser LIKE %s AND sourcedomain IN (
+		#		SELECT parent FROM domain_clones WHERE child IN (
+		#			SELECT id FROM virtual_domains WHERE name=%s ) )""", (user, domain) )
+		rows = c.fetchall()
+		cache[email] = set([r[0] for r in rows])
 	return (email, [get_tree(m, d+1) for m in cache[email]])
 
 
-def del_link(from_email, to_email):
+def del_link(user, domid, to_email):
 	global c
 	global db
-	c.execute("DELETE FROM virtual_aliases WHERE source LIKE %s and destination LIKE %s",
-		(from_email, to_email))
+	c.execute("DELETE FROM virtual_aliases WHERE sourceuser=%s AND sourcedomain=%s AND destination=%s",
+		(user, domid, to_email))
 	affected_rows = db.affected_rows()
 	db.commit()
 	return affected_rows
 
-def add_link(from_email, to_email):
+def add_link(user, domid, to_email):
 	global c
 	global db
-	c.execute("INSERT INTO virtual_aliases (source, destination) VALUES (%s, %s)", 
-		(from_email, to_email))
+	c.execute("INSERT INTO virtual_aliases (sourceuser, sourcedomain, destination) VALUES (%s, %s, %s)", 
+		(user, domid, to_email))
 	affected_rows = db.affected_rows() 
 	db.commit()
 	return affected_rows
 
 def print_tree(tree, level=0, indent="    "):
-	print (level*indent)+tree[0]
-	for a in tree[1]:
-		print_tree(a, level+1)
+	if len(cache) <= 1:
+		print "Error: Address not found"
+	else:
+		print (level*indent)+tree[0]
+		for a in tree[1]:
+			print_tree(a, level+1)
 
 def get_open_leaves():
 	global c
-	global db
 	# mailman.jongedemocraten.nl is a virtual alias domain, but is delivered locally
 	c.execute("SELECT name FROM virtual_domains WHERE name != 'mailman.jongedemocraten.nl'")
 	rows = c.fetchall()
@@ -71,11 +86,11 @@ def get_open_leaves():
 	# Select all aliases that point to a virtual_alias_domain (i.e. another alias)
 	# Don't apply formatting string directly to first argument of c.execute() because of SQL-escaping
 	expr = ".*(%s)" % string.join(domains, "|")
-	c.execute("SELECT * FROM virtual_aliases WHERE destination REGEXP %s", expr)
+	c.execute("SELECT destination FROM virtual_aliases WHERE destination REGEXP %s", expr)
 	rows = c.fetchall()
 	open_leaves = set()
 	for r in rows:
-		tree = get_tree(r[2]) # Get tree from the destination
+		tree = get_tree(r[0]) # Get tree from the destination
 		subtrees = [tree]
 		leaves = set()
 		while subtrees:
@@ -90,9 +105,11 @@ def get_open_leaves():
 	return list(open_leaves)
 
 def alias_copy(rows, reorig, rechange):
+	global c
+	global db
 	# reorig and rechange are just strings, not re objects
 	if len(rows) < 1:
-		print "No unit aliases found"
+		print "Error: No unit aliases found"
 		return 0
 	newalias = {}
 	for r in rows:
@@ -110,7 +127,7 @@ def alias_copy(rows, reorig, rechange):
 	#TODO: delete aliases that should no longer exist
 	#srcdel = srcexist - sources
 	if len(srcmake) < 1:
-		print "Nothing to do"
+		print "Info: Nothing to do"
 		return 0
 	a = []
 	for s in srcmake:
@@ -123,11 +140,11 @@ def alias_copy(rows, reorig, rechange):
 		print "%s => %s" % (r[0], r[1])
 	if raw_input("Proceed? [y/N] ").startswith(("y","Y","j","J")):
 		db.commit()
-		print "Committed"
+		print "Info: Committed"
 		return 1
 	else:
 		db.rollback()
-		print "Rolled back"
+		print "Info: Rolled back"
 		return 0
 
 def make_units(unit):
@@ -137,12 +154,20 @@ def make_units(unit):
 	# alias_copy(rows, reorig, rechange)
 	return alias_copy(c.fetchall(), r"(.*)\.%s@jongedemocraten\.nl" % unit, r"\1@jd%s.nl" % unit)
 
-def make_subunits(subunit, unit):
+def domain_cache():
 	global c
-	global db
-	c.execute("SELECT source FROM virtual_aliases WHERE source LIKE %s", ("%@jd"+unit+".nl",) )
-	# alias_copy(rows, reorig, rechange)
-	return alias_copy(c.fetchall(), r"(.*)@jd%s\.nl" % unit, r"\1@jd%s.nl" % subunit)
+	global domcache
+	global rdomcache
+	canoncache = {}
+	c.execute("SELECT child, parent FROM domain_clones WHERE child!=parent")
+	for child, parent in c.fetchall():
+		canoncache[child] = parent
+	c.execute("SELECT id, name FROM virtual_domains")
+	for id, name in c.fetchall():
+		domcache[id] = name
+		# if domain is just an alias of another domain, rdomcache value is id of real domain not alias
+		rdomcache[name] = canoncache[id] if id in canoncache else id
+	return 1
 
 def print_usage():
 	print """\
@@ -155,9 +180,6 @@ postfix_alias address@jongedemocraten.nl
 postfix_alias unit unitname
 	Creates jdunit.nl aliases, asks for confirmation first.
 	e.g. postfix_alias unit twente
-postfix_alias subunit subunitname unitname
-	Creates jdsubunit.nl aliases to point to jdunit.nl equivalents.
-	e.g. postfix_alias subunit enschede twente
 postfix_alias add source@jongedemocraten.nl destination@jongedemocraten.nl
 	Adds a new alias.
 postfix_alias del source@jongedemocraten.nl destination@jongedemocraten.nl
@@ -171,13 +193,14 @@ if __name__ == "__main__":
 	db = MySQLdb.connect(user=DBUSER, passwd=DBPASSWD, db=DBNAME)
 	c = db.cursor()
 	c.execute("START TRANSACTION")
+	domain_cache()
 	if len(sys.argv) == 1:
-		expr = string.join(get_open_leaves(), "', '")
-		c.execute("SELECT source, destination FROM virtual_aliases WHERE destination IN ('%s')" % expr)
-		print "Aliases going nowhere:\n"
-		for a in c.fetchall():
-			print "%s %s" % (a[0], a[1])
-		print "\nTo remove, copypaste each line to: postfix_alias del"
+		for l in get_open_leaves():
+			c.execute("SELECT sourceuser, sourcedomain FROM virtual_aliases WHERE destination=%s", (l,))
+			rows = c.fetchall()
+			for r in rows:
+				# output: alias@jdafdeling.nl doodlopend@jongedemocraten.nl
+				print "%s@%s %s" % (r[0], domcache[r[1]], l)
 	elif len(sys.argv) == 2:
 		# sys.argv[0] email
 		# print full tree
@@ -193,13 +216,23 @@ if __name__ == "__main__":
 		# sys.argv[0] cmd source_email dest_email
 		# Add or remove the link between source_email and dest_email
 		if sys.argv[1] == "add":
-			add_link(expand_email(sys.argv[2]), expand_email(sys.argv[3]))
-			sys.exit(0)
+			user, domain, domid = parse_email(sys.argv[2])
+			if domid:
+				add_link(user, domid, expand_email(sys.argv[3]))
+				print "OK"
+				sys.exit(0)
+			else:
+				print "Error: Domain-part of email-address not recognised, add domain first"
+				sys.exit(1)
 		elif sys.argv[1] == "del":
-			del_link(expand_email(sys.argv[2]), expand_email(sys.argv[3]))
-			sys.exit(0)
-		elif sys.argv[1] == "subunit":
-			make_subunits(sys.argv[2], sys.argv[3])
+			user, domain, domid = parse_email(sys.argv[2])
+			if domid:
+				del_link(user, domid, expand_email(sys.argv[3]))
+				print "OK"
+				sys.exit(0)
+			else:
+				print "Error: Domain-part of email-address not recognised, add domain first"
+				sys.exit(1)
 		else:
 			print_usage()
 			sys.exit(127)
