@@ -69,7 +69,9 @@ def get_open_leaves():
 	for r in rows:
 		domains.add("@%s" % r[0])
 	# Select all aliases that point to a virtual_alias_domain (i.e. another alias)
-	c.execute("SELECT * FROM virtual_aliases WHERE destination REGEXP '.*(%s)'" % string.join(domains, "|"))
+	# Don't apply formatting string directly to first argument of c.execute() because of SQL-escaping
+	expr = ".*(%s)" % string.join(domains, "|")
+	c.execute("SELECT * FROM virtual_aliases WHERE destination REGEXP %s", expr)
 	rows = c.fetchall()
 	open_leaves = set()
 	for r in rows:
