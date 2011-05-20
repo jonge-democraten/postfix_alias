@@ -27,6 +27,7 @@ def expand_email(e):
 def parse_email(e):
 	# Split user@example.net to user and example.net
 	user, domain = re.split("@", e, 1)
+	# Find domain id if example.net is a known domain
 	if domain in rdomcache:
 		domid = rdomcache[domain]
 		return user, domain, domid
@@ -81,11 +82,15 @@ def get_open_leaves():
 	c.execute("SELECT name FROM virtual_domains WHERE name != 'mailman.jongedemocraten.nl'")
 	rows = c.fetchall()
 	domains = set()
+	# Prefix all domains with @ for easy of use in later string.endswith
 	for r in rows:
 		domains.add("@%s" % r[0])
+	# INvsRE:
+	# When passing an array or comma-joined string as arg to "WHERE foo IN %s",
+	# MySqlDb adds too many escapes and intended effect is not achieved,
+	# use regexp as workaround "^(this|that|something|else)$"
+	expr = ".*(%s)" % "|".join(domains)
 	# Select all aliases that point to a virtual_alias_domain (i.e. another alias)
-	# Don't apply formatting string directly to first argument of c.execute() because of SQL-escaping
-	expr = ".*(%s)" % string.join(domains, "|")
 	c.execute("SELECT destination FROM virtual_aliases WHERE destination REGEXP %s", expr)
 	rows = c.fetchall()
 	open_leaves = set()
@@ -104,40 +109,42 @@ def get_open_leaves():
 				open_leaves.add(l)
 	return list(open_leaves)
 
-def alias_copy(rows, reorig, rechange):
+def alias_copy(rows, fromdomid, todomid):
 	global c
 	global db
-	# reorig and rechange are just strings, not re objects
 	if len(rows) < 1:
 		print "Error: No unit aliases found"
 		return 0
 	newalias = {}
 	for r in rows:
-		# Replace function.unit@jongedemocraten.nl with function@jdunit.nl
-		unitsrc = re.sub(reorig, rechange, r[0])
-		newalias[unitsrc] = r[0]
+		# Replace function.unit with function
+		fromuser = r[0].rsplit(".", 1)[0]
+		newalias[fromuser] = "%s@%s" % (r[0], domcache[fromdomid])
 	# Only create new aliases if no existing alias exists yet
-	sources = set(newalias.keys())
-	c.execute("SELECT source FROM virtual_aliases WHERE source IN ('%s')" % string.join(sources, "', '"))
+	users = set(newalias.keys())
+	# See note: INvsRE
+	expr = "^(%s)$" % "|".join(users)
+	# Find existing aliases
+	c.execute("SELECT sourceuser FROM virtual_aliases WHERE sourceuser REGEXP %s and sourcedomain=%s", (expr, todomid))
 	rows = c.fetchall()
-	srcexist = set()
+	usrexist = set()
 	for r in rows:
-		srcexist.add(r[0])
-	srcmake = sources - srcexist
-	#TODO: delete aliases that should no longer exist
-	#srcdel = srcexist - sources
-	if len(srcmake) < 1:
+		usrexist.add(r[0])
+	usrmake = users - usrexist
+	if len(usrmake) < 1:
 		print "Info: Nothing to do"
 		return 0
 	a = []
-	for s in srcmake:
-		a.append( (s, newalias[s]) )
-	c.executemany("INSERT INTO virtual_aliases (source, destination) VALUES (%s, %s)", a)
-	c.execute("SELECT source, destination FROM virtual_aliases WHERE source IN ('%s')" % string.join(srcmake, "', '"))
+	for u in usrmake:
+		a.append( (u, todomid, newalias[u]) )
+	c.executemany("INSERT INTO virtual_aliases (sourceuser, sourcedomain, destination) VALUES (%s, %s, %s)", a)
+	# See note: INvsRE
+	expr = "^(%s)$" % "|".join(usrmake)
+	c.execute("SELECT sourceuser, sourcedomain, destination FROM virtual_aliases WHERE sourceuser REGEXP %s AND sourcedomain=%s", (expr, todomid))
 	rows = c.fetchall()
 	print "Will create following aliases:"
 	for r in rows:
-		print "%s => %s" % (r[0], r[1])
+		print "%s@%s => %s" % (r[0], domcache[r[1]], r[2])
 	if raw_input("Proceed? [y/N] ").startswith(("y","Y","j","J")):
 		db.commit()
 		print "Info: Committed"
@@ -150,22 +157,41 @@ def alias_copy(rows, reorig, rechange):
 def make_units(unit):
 	global c
 	global db
-	c.execute("SELECT source, destination FROM virtual_aliases WHERE source LIKE '%%.%s@jongedemocraten.nl'" % unit)
-	# alias_copy(rows, reorig, rechange)
-	return alias_copy(c.fetchall(), r"(.*)\.%s@jongedemocraten\.nl" % unit, r"\1@jd%s.nl" % unit)
+	# FIXME: replace jd.test by nl
+	# Lookup domid of primairy domain
+	#fromdomid = rdomcache["jongedemocraten.nl"]
+	fromdomid = rdomcache["jongedemocraten.jd.test"]
+	# Lookup domid of jdunit.nl
+	#todomain = "jd%s.nl" % unit
+	todomain = "jd%s.jd.test" % unit
+	if todomain in rdomcache:
+		todomid = rdomcache[todomain] 
+	else:
+		print "Error: Domain not recognised, add domain first"
+		return 0
+	# Find all rows with format function.unit@jongedemocraten.nl
+	c.execute("SELECT sourceuser, sourcedomain, destination FROM virtual_aliases WHERE sourceuser LIKE %s AND sourcedomain=%s", ("%."+unit, fromdomid))
+	rows = c.fetchall()
+	# Make aliases to function@jdunit.nl
+	return alias_copy(rows, fromdomid, todomid)
 
 def domain_cache():
 	global c
 	global domcache
 	global rdomcache
 	canoncache = {}
+	# Find all domains that are alternative names for another domain
 	c.execute("SELECT child, parent FROM domain_clones WHERE child!=parent")
 	for child, parent in c.fetchall():
 		canoncache[child] = parent
+	# Find all Postfix virtual_alias_domains
 	c.execute("SELECT id, name FROM virtual_domains")
 	for id, name in c.fetchall():
+		# Create cache of domain id to human-readable name
 		domcache[id] = name
-		# if domain is just an alias of another domain, rdomcache value is id of real domain not alias
+		# Create cache of human-readable name to canonical domain id
+		# No aliases should exist with a domid of an altname-domain
+		# If altname-domain, rdomcache value is id of real domain
 		rdomcache[name] = canoncache[id] if id in canoncache else id
 	return 1
 
