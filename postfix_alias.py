@@ -195,6 +195,39 @@ def make_units(unit):
 	# Make aliases to function@jdunit.nl
 	return alias_copy(rows, fromdomid, todomid)
 
+def make_global(user, dest):
+	global c
+	global db
+	# Find already existing addresses
+	c.execute("SELECT DISTINCT sourcedomain FROM virtual_aliases WHERE sourceuser=%s", (user,))
+	rows = c.fetchall()
+	exist = set()
+	for r in rows:
+		exist.add(r[0])
+	# Only create for real domains (not altnames) that don't have the alias yet
+	make = set(rdomcache.values()) - exist
+	if len(make) < 1:
+		print "Info: Nothing to do"
+		return 0
+	a = []
+	for m in make:
+		a.append( (user, m, dest) )
+	c.executemany("INSERT INTO virtual_aliases (sourceuser, sourcedomain, destination) VALUES (%s, %s, %s)", a)
+	c.execute("SELECT sourceuser, sourcedomain, destination FROM virtual_aliases WHERE sourceuser=%s AND sourcedomain IN %s", (user, tuple(make)))
+	rows = c.fetchall()
+	print "Will create following aliases:"
+	for r in rows:
+		print "%s@%s => %s" % (r[0], domcache[r[1]], r[2])
+	if raw_input("Proceed? [y/N] ").startswith(("y","Y","j","J")):
+		db.commit()
+		print "Info: Committed"
+		return 1
+	else:
+		db.rollback()
+		print "Info: Rolled back"
+		return 0
+	
+
 def domain_cache():
 	global c
 	global domcache
@@ -229,7 +262,10 @@ postfix_alias unit unitname
 postfix_alias add source@jongedemocraten.nl destination@jongedemocraten.nl
 	Adds a new alias.
 postfix_alias del source@jongedemocraten.nl destination@jongedemocraten.nl
-	Removes an existing alias."""
+	Removes an existing alias.
+postfix_alias global sourceuser destination@jongedemocraten.nl
+	Creates aliases under each domain pointing sourceuser to destination
+	Useful for abuse/postmaster addresses"""
 	return
 
 
@@ -282,6 +318,8 @@ if __name__ == "__main__":
 			else:
 				print "Error: Domain-part of email-address not recognised, add domain first"
 				sys.exit(1)
+		elif sys.argv[1] == "global":
+			sys.exit ( 0 if make_global(sys.argv[2], sys.argv[3]) else 1 )
 		else:
 			print_usage()
 			sys.exit(127)
