@@ -26,7 +26,7 @@ def expand_email(e):
 
 def parse_email(e):
 	# Split user@example.net to user and example.net
-	user, domain = re.split("@", e, 1)
+	user, domain = re.split("@", expand_email(e), 1)
 	# Find domain id if example.net is a known domain
 	if domain in rdomcache:
 		domid = rdomcache[domain]
@@ -154,16 +154,36 @@ def alias_copy(rows, fromdomid, todomid):
 		print "Info: Rolled back"
 		return 0
 
+def alias_convert():
+	global c
+	global db
+	# If domain is an altname for a real domain, don't convert aliases
+	realdoms = set(domcache.keys()) & set(rdomcache.values())
+	for d in realdoms:
+		c.execute("""INSERT INTO virtual_aliases (sourceuser, sourcedomain, destination)
+			SELECT SUBSTRING_INDEX(source,'@',1), %s, destination FROM virtual_aliases_old WHERE source LIKE %s""", (d, "%@"+domcache[d]))
+	c.execute("SELECT * FROM virtual_aliases")
+	rows = c.fetchall()
+	print "Warning: Convert action designed for one-time use only"
+	for r in rows:
+		print "%d %24s@%-24s [%d] %48s" % (r[0], r[1], domcache[r[2]], r[2], r[3])
+	print "Warning: Convert action designed for one-time use only"
+	if raw_input("Proceed? [y/N] ").startswith(("y","Y","j","J")):
+		db.commit()
+		print "Info: Committed"
+		return 1
+	else:
+		db.rollback()
+		print "Info: Rolled back"
+		return 0
+
 def make_units(unit):
 	global c
 	global db
-	# FIXME: replace jd.test by nl
 	# Lookup domid of primairy domain
-	#fromdomid = rdomcache["jongedemocraten.nl"]
-	fromdomid = rdomcache["jongedemocraten.jd.test"]
+	fromdomid = rdomcache["jongedemocraten.nl"]
 	# Lookup domid of jdunit.nl
-	#todomain = "jd%s.nl" % unit
-	todomain = "jd%s.jd.test" % unit
+	todomain = "jd%s.nl" % unit
 	if todomain in rdomcache:
 		todomid = rdomcache[todomain] 
 	else:
@@ -235,6 +255,9 @@ if __name__ == "__main__":
 	elif len(sys.argv) == 3:
 		if sys.argv[1] == "unit":
 			sys.exit( 0 if make_units(sys.argv[2]) else 1 )
+		# put under argv=3 to avoid collisions with potential address convert@
+		elif sys.argv[1] == "convert":
+			sys.exit( 0 if alias_convert() else 1 )
 		else:
 			print_usage()
 			sys.exit(127)
