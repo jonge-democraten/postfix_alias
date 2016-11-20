@@ -314,7 +314,7 @@ if __name__ == "__main__":
 			if domid:
 				affected_rows = del_link(user, domid, expand_email(sys.argv[3]))
 				if not affected_rows:
-					print "Error: Alias does not exist"
+					print "Error: Alias does not contain this address"
 				sys.exit(0)
 			else:
 				print "Error: Domain-part of email-address not recognised, add domain first"
